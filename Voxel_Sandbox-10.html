@@ -56,6 +56,15 @@
   .mslot.tool{cursor:pointer;} .mslot.tool:hover{background:#a6a6a6;}
   .mslot.act{outline:3px solid #fff;outline-offset:-3px;}
   .mslot.equipped{outline:3px solid #ffd54f;outline-offset:-3px;}
+  .mslot.rainbowArmor{outline:3px solid transparent;outline-offset:-3px;}
+  .mslot.rainbowArmor::before{content:'';position:absolute;inset:-3px;border-radius:2px;padding:3px;
+    background:conic-gradient(from 0deg, #ff004c, #ff9800, #ffee00, #4caf50, #2196f3, #7c4dff, #ff004c);
+    -webkit-mask:linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite:xor; mask-composite:exclude;
+    animation:rainbowSpin 2.4s linear infinite; pointer-events:none;}
+  .mslot.rainbowArmor .ico{fill:#ff0033;stroke:#ff0033;opacity:1;animation:rainbowHue 2.4s linear infinite;}
+  @keyframes rainbowSpin{to{transform:rotate(360deg);}}
+  @keyframes rainbowHue{from{filter:hue-rotate(0deg) saturate(2.2);}to{filter:hue-rotate(360deg) saturate(2.2);}}
   .mcount{position:absolute;right:3px;bottom:1px;color:#fff;font:bold 14px/1 'Consolas','Courier New',monospace;text-shadow:2px 2px 0 #3f3f3f;}
   .mslot .ico{width:26px;height:26px;fill:#9b9b9b;stroke:#707070;opacity:.75;}
   #craftTitle{left:194px;top:8px;color:#404040;font-size:16px;}
@@ -109,6 +118,15 @@
   #respawnBtn{padding:10px 26px;background:linear-gradient(#7a6248,#5c4a34);border:none;color:#f2e9d8;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:.03em;
     box-shadow:inset 1px 1px 0 #ffffff40, inset -1px -1px 0 #00000040;}
   #respawnBtn:hover{filter:brightness(1.15);}
+
+  #debugChat{position:fixed;left:12px;bottom:14px;width:420px;max-width:70vw;z-index:30;display:none;font-family:'Consolas','Courier New',monospace;}
+  #debugChatLog{display:flex;flex-direction:column;gap:2px;margin-bottom:6px;max-height:180px;overflow-y:auto;}
+  #debugChatLog .chatLine{color:#fff;font-size:12.5px;text-shadow:1.5px 1.5px 0 #000;background:#00000080;padding:2px 6px;border-radius:3px;width:fit-content;max-width:100%;word-break:break-word;}
+  #debugChatLog .chatLine.err{color:#ff6b6b;}
+  #debugChatLog .chatLine.ok{color:#8bc24a;}
+  #debugChatInputRow{display:flex;align-items:center;background:#000000b3;border-radius:4px;padding:6px 8px;box-shadow:inset 1px 1px 0 #fff2, 0 4px 14px #0008;}
+  #debugChatInputRow .prefix{color:#8bc24a;font-weight:700;margin-right:6px;}
+  #debugChatInput{flex:1;background:transparent;border:none;outline:none;color:#fff;font-family:inherit;font-size:13px;}
 </style>
 </head>
 <body>
@@ -149,6 +167,10 @@
       <div id="hotRow"></div>
     </div>
   </div>
+</div>
+<div id="debugChat">
+  <div id="debugChatLog"></div>
+  <div id="debugChatInputRow"><span class="prefix">&gt;</span><input id="debugChatInput" autocomplete="off" spellcheck="false" placeholder="\add wood 10 · \armor on · \help"></div>
 </div>
 <div id="furnace">
   <div id="furnacePanel">
@@ -236,6 +258,15 @@ const TOOL_INFO = {
   [WSHOVEL]:{cat:'shovel',mult:0.5}, [SSHOVEL]:{cat:'shovel',mult:0.3},
 };
 let equippedTool = null;
+
+// ---- Debug chat state (armor toggle lives here so takeDamage() can see it) ----
+const DEBUG_ARMOR_REDUCTION = 0.8; // fraction of incoming damage blocked while debug armor is on
+let debugArmorEnabled = false;
+const armorSlotEls = []; // filled in by buildInvStatic() below; toggled by setDebugArmor()
+function setDebugArmor(on){
+  debugArmorEnabled = on;
+  armorSlotEls.forEach(el=> el.classList.toggle('rainbowArmor', on));
+}
 function getBreakTicks(type){
   let ticks = BLOCK_TICKS[type] ?? 4;
   const info = equippedTool!=null ? TOOL_INFO[equippedTool] : null;
@@ -286,7 +317,7 @@ function mSlot(item, count){ // one Minecraft-style inventory slot
   const ico = d => `<svg class="ico" viewBox="0 0 16 16"><path d="${d}"/></svg>`;
   const armor = document.getElementById('armor');
   ['M3 10a5 5 0 0110 0v4h-3v-3H6v3H3z','M2 3h4l2 2 2-2h4v5h-2v6H4V8H2z','M3 2h10v5l-1 7H9L8 7 7 14H4L3 7z','M3 3h4v6l4 1v3H3zM9 3h4v9H9z']
-    .forEach(d=>{ const e=mSlot(null,0); e.innerHTML=ico(d); armor.appendChild(e); });
+    .forEach((d,i)=>{ const e=mSlot(null,0); e.innerHTML=ico(d); e.id='armorSlot'+i; armor.appendChild(e); armorSlotEls.push(e); });
   document.getElementById('offhand').innerHTML = ico('M3 2h10v6c0 3-3 5-5 6-2-1-5-3-5-6z');
   const x = document.getElementById('playerCv').getContext('2d');
   x.fillStyle='#000'; x.fillRect(0,0,98,140);
@@ -1169,6 +1200,7 @@ function flashDamage(){
 }
 function takeDamage(amount, cause){
   if(dead) return;
+  if(debugArmorEnabled) amount *= (1 - DEBUG_ARMOR_REDUCTION);
   health = Math.max(0, health - amount);
   updateHealthUI();
   flashDamage();
@@ -1208,9 +1240,9 @@ titleScreenEl.addEventListener('click', e=>{
   titleScreenEl.style.display = 'none';
   document.body.requestPointerLock();
 });
-document.body.addEventListener('click', ()=>{ if(!invOpen && !furnaceOpen && !dead) document.body.requestPointerLock(); });
+document.body.addEventListener('click', ()=>{ if(!invOpen && !furnaceOpen && !chatOpen && !dead) document.body.requestPointerLock(); });
 document.addEventListener('pointerlockchange', ()=>{
-  overlay.style.display = (document.pointerLockElement || invOpen || furnaceOpen || dead) ? 'none' : 'flex';
+  overlay.style.display = (document.pointerLockElement || invOpen || furnaceOpen || chatOpen || dead) ? 'none' : 'flex';
 });
 document.addEventListener('mousemove', e=>{
   if(document.pointerLockElement !== document.body) return;
@@ -1219,8 +1251,109 @@ document.addEventListener('mousemove', e=>{
   pitch = Math.max(-Math.PI/2+0.01, Math.min(Math.PI/2-0.01, pitch));
 });
 
+// ---- Secret debug chat ----
+// Alt+\ toggles a small command console (hidden from the normal UI/hint text)
+// that can spawn inventory items or flip on a flat damage-reduction "armor"
+// for testing, without needing to actually mine/craft anything.
+let chatOpen = false;
+const debugChatEl = document.getElementById('debugChat');
+const debugChatInput = document.getElementById('debugChatInput');
+const debugChatLogEl = document.getElementById('debugChatLog');
+
+function openDebugChat(){
+  if(dead) return;
+  if(invOpen) closeInventory();
+  if(furnaceOpen) closeFurnace();
+  chatOpen = true;
+  document.exitPointerLock();
+  debugChatEl.style.display = 'block';
+  debugChatInput.value = '';
+  debugChatInput.focus();
+}
+function closeDebugChat(){
+  chatOpen = false;
+  debugChatEl.style.display = 'none';
+  debugChatInput.blur();
+}
+function logDebug(msg, cls){
+  const line = document.createElement('div');
+  line.className = 'chatLine' + (cls ? ' '+cls : '');
+  line.textContent = msg;
+  debugChatLogEl.appendChild(line);
+  while(debugChatLogEl.children.length > 8) debugChatLogEl.removeChild(debugChatLogEl.firstChild);
+  debugChatLogEl.scrollTop = debugChatLogEl.scrollHeight;
+}
+function findItemByName(nameRaw){
+  const n = nameRaw.trim().toLowerCase();
+  if(!n) return -1;
+  let idx = ITEMS.findIndex(it=> it.name.toLowerCase()===n);
+  if(idx===-1) idx = ITEMS.findIndex(it=> it.name.toLowerCase().replace(/\s+/g,'')===n.replace(/\s+/g,''));
+  if(idx===-1) idx = ITEMS.findIndex(it=> it.name.toLowerCase().startsWith(n));
+  return idx;
+}
+function runDebugCommand(raw){
+  const trimmed = raw.trim();
+  if(!trimmed) return;
+  logDebug('> '+trimmed);
+  const tokens = trimmed.replace(/^[\\/]/, '').split(/\s+/).filter(Boolean);
+  if(!tokens.length) return;
+  const cmd = tokens[0].toLowerCase();
+  const args = tokens.slice(1);
+
+  if(cmd==='help'){
+    logDebug('\\add <item> [qty]  ·  \\armor on|off  ·  \\heal  ·  \\clear', 'ok');
+    return;
+  }
+  if(cmd==='clear'){ debugChatLogEl.innerHTML=''; return; }
+  if(cmd==='heal'){
+    health = MAX_HEALTH; updateHealthUI();
+    logDebug('Healed to full health.', 'ok');
+    return;
+  }
+  if(cmd==='armor' || cmd==='armour'){
+    const state = (args[0]||'').toLowerCase();
+    if(state===''||state==='on'||state==='true'){
+      setDebugArmor(true);
+      logDebug('Debug armor ENABLED 🌈 ('+Math.round(DEBUG_ARMOR_REDUCTION*100)+'% damage reduction).', 'ok');
+    } else if(state==='off'||state==='false'){
+      setDebugArmor(false);
+      logDebug('Debug armor DISABLED.', 'ok');
+    } else {
+      logDebug('Usage: \\armor on|off', 'err');
+    }
+    return;
+  }
+  if(cmd==='add' || cmd==='give'){
+    if(!args.length){ logDebug('Usage: \\add <item> [qty]', 'err'); return; }
+    const nameTokens = args.slice();
+    let qty = 1;
+    if(/^\d+$/.test(nameTokens[nameTokens.length-1])){ qty = Math.max(1, parseInt(nameTokens.pop(),10)); }
+    const name = nameTokens.join(' ');
+    const idx = findItemByName(name);
+    if(!name || idx===-1){ logDebug('Unknown item: "'+name+'"', 'err'); return; }
+    if(ITEMS[idx].hidden){ logDebug('Can\'t add "'+ITEMS[idx].name+'" — it\'s an environment-only block.', 'err'); return; }
+    inventory[idx] = (inventory[idx]||0) + qty;
+    renderHotbar();
+    if(invOpen) renderInvUI();
+    logDebug('Added '+qty+'x '+ITEMS[idx].name+'.', 'ok');
+    return;
+  }
+  logDebug('Unknown command: "'+cmd+'". Type \\help for a list.', 'err');
+}
+debugChatInput.addEventListener('keydown', e=>{
+  e.stopPropagation();
+  if(e.code==='Enter' || e.code==='NumpadEnter'){ runDebugCommand(debugChatInput.value); debugChatInput.value=''; }
+  else if(e.code==='Escape'){ closeDebugChat(); }
+});
+
 const keys = {};
 document.addEventListener('keydown', e=>{
+  if(e.altKey && e.code==='Backslash'){
+    e.preventDefault();
+    chatOpen ? closeDebugChat() : openDebugChat();
+    return;
+  }
+  if(chatOpen) return;
   keys[e.code]=true;
   if(/^Digit[0-9]$/.test(e.code)){
     let n = parseInt(e.code.slice(5));
